@@ -171,7 +171,7 @@ func (b *ResticBackup) Restore(ctx context.Context, _ io.Reader, _ RestoreCallba
 		return err
 	}
 
-	stdout, stderr, err := runRestic(ctx, repoPath, "", "restore", "--overwrite", manifest.SnapshotID, "--target", manifest.TargetPath)
+	stdout, stderr, err := runRestic(ctx, repoPath, "", "restore", manifest.SnapshotID, "--target", manifest.TargetPath)
 	if err != nil {
 		b.log().
 			WithField("stdout", string(stdout)).
