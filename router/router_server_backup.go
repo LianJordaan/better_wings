@@ -97,22 +97,26 @@ func postServerRestoreBackup(c *gin.Context) {
 
 	// Now that we've cleaned up the data directory if necessary, grab the backup file
 	// and attempt to restore it into the server directory.
-	if data.Adapter == backup.LocalBackupAdapter || data.Adapter == backup.ResticBackupAdapter {
+	if data.Adapter != backup.S3BackupAdapter {
 		var b backup.BackupInterface
-		if data.Adapter == backup.LocalBackupAdapter {
-			local, _, err := backup.LocateLocal(client, c.Param("backup"))
-			if err != nil {
-				middleware.CaptureAndAbort(c, err)
+		driverLabel := "restic"
+
+		resticBackup, _, rerr := backup.LocateRestic(client, c.Param("backup"))
+		if rerr == nil {
+			b = resticBackup
+		} else if errors.Is(rerr, os.ErrNotExist) {
+			localBackup, _, lerr := backup.LocateLocal(client, c.Param("backup"))
+			if lerr != nil {
+				middleware.CaptureAndAbort(c, lerr)
 				return
 			}
-			b = local
+			b = localBackup
+			driverLabel = "local"
 		} else {
-			b = backup.NewRestic(client, c.Param("backup"), "")
+			middleware.CaptureAndAbort(c, rerr)
+			return
 		}
-		driverLabel := "local"
-		if data.Adapter == backup.ResticBackupAdapter {
-			driverLabel = "restic"
-		}
+
 		go func(s *server.Server, b backup.BackupInterface, logger *log.Entry) {
 			logger.WithField("driver", driverLabel).Info("starting restoration process for server backup")
 			if err := s.RestoreBackup(b, nil); err != nil {

@@ -42,6 +42,17 @@ func getDownloadBackup(c *gin.Context) {
 		return
 	}
 
+	// Check for a restic manifest before attempting to locate a local archive.
+	if _, _, err := backup.LocateRestic(client, token.BackupUuid); err == nil {
+		c.AbortWithStatusJSON(http.StatusNotImplemented, gin.H{
+			"error": "This backup was created using restic and cannot be downloaded via this endpoint.",
+		})
+		return
+	} else if !errors.Is(err, os.ErrNotExist) {
+		middleware.CaptureAndAbort(c, err)
+		return
+	}
+
 	// Locate the backup on the local disk.
 	b, st, err := backup.LocateLocal(client, token.BackupUuid)
 	if err != nil {
