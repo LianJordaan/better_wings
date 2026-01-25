@@ -164,5 +164,13 @@ func (s *Server) RestoreBackup(b backup.BackupInterface, reader io.ReadCloser) (
 		return s.Filesystem().Chtimes(file, atime, atime)
 	})
 
+	if err == nil {
+		if _, ok := b.(*backup.ResticBackup); ok {
+			if _, uerr := s.Filesystem().RecalculateUsage(); uerr != nil {
+				s.Log().WithField("error", uerr).Warn("failed to recalculate disk usage after restic restore")
+			}
+		}
+	}
+
 	return errors.WithStackIf(err)
 }

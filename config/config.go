@@ -289,6 +289,28 @@ type Backups struct {
 	//
 	// Defaults to "best_speed" (level 1)
 	CompressionLevel string `default:"best_speed" yaml:"compression_level"`
+
+	Restic ResticConfiguration `yaml:"restic"`
+}
+
+type ResticConfiguration struct {
+	// Binary is the path to the restic executable.
+	Binary string `default:"restic" yaml:"binary"`
+
+	// RepoBasePath is the base directory for local restic repositories.
+	RepoBasePath string `yaml:"repo_base_path"`
+
+	// RepoBaseURL is the base repository URL for remote backends (unused for local repos).
+	RepoBaseURL string `yaml:"repo_base_url"`
+
+	// Username to use for remote repository backends (unused for local repos).
+	Username string `yaml:"username"`
+
+	// RepoPassword is the restic repository password.
+	RepoPassword string `yaml:"repo_password"`
+
+	// PrivateKeyPath is the path to a private SSH key for remote repository backends (unused for local repos).
+	PrivateKeyPath string `yaml:"private_key_path"`
 }
 
 type Transfers struct {

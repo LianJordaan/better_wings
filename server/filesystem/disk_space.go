@@ -128,6 +128,11 @@ func (fs *Filesystem) DiskUsage(allowStaleValue bool) (int64, error) {
 	return fs.unixFS.Usage(), nil
 }
 
+// RecalculateUsage forces a fresh disk usage calculation for this filesystem.
+func (fs *Filesystem) RecalculateUsage() (int64, error) {
+	return fs.updateCachedDiskUsage()
+}
+
 // Updates the currently used disk space for a server.
 func (fs *Filesystem) updateCachedDiskUsage() (int64, error) {
 	// Obtain an exclusive lock on this process so that we don't unintentionally run it at the same

@@ -29,16 +29,7 @@ func postServerBackup(c *gin.Context) {
 		return
 	}
 
-	var adapter backup.BackupInterface
-	switch data.Adapter {
-	case backup.LocalBackupAdapter:
-		adapter = backup.NewLocal(client, data.Uuid, data.Ignore)
-	case backup.S3BackupAdapter:
-		adapter = backup.NewS3(client, data.Uuid, data.Ignore)
-	default:
-		middleware.CaptureAndAbort(c, errors.New("router/backups: provided adapter is not valid: "+string(data.Adapter)))
-		return
-	}
+	adapter := backup.NewRestic(client, data.Uuid, data.Ignore)
 
 	// Attach the server ID and the request ID to the adapter log context for easier
 	// parsing in the logs.
@@ -71,7 +62,7 @@ func postServerRestoreBackup(c *gin.Context) {
 	logger := middleware.ExtractLogger(c)
 
 	var data struct {
-		Adapter           backup.AdapterType `binding:"required,oneof=wings s3" json:"adapter"`
+		Adapter           backup.AdapterType `binding:"required,oneof=wings s3 restic" json:"adapter"`
 		TruncateDirectory bool               `json:"truncate_directory"`
 		// A UUID is always required for this endpoint, however the download URL
 		// is only present when the given adapter type is s3.
@@ -106,20 +97,30 @@ func postServerRestoreBackup(c *gin.Context) {
 
 	// Now that we've cleaned up the data directory if necessary, grab the backup file
 	// and attempt to restore it into the server directory.
-	if data.Adapter == backup.LocalBackupAdapter {
-		b, _, err := backup.LocateLocal(client, c.Param("backup"))
-		if err != nil {
-			middleware.CaptureAndAbort(c, err)
-			return
+	if data.Adapter == backup.LocalBackupAdapter || data.Adapter == backup.ResticBackupAdapter {
+		var b backup.BackupInterface
+		if data.Adapter == backup.LocalBackupAdapter {
+			local, _, err := backup.LocateLocal(client, c.Param("backup"))
+			if err != nil {
+				middleware.CaptureAndAbort(c, err)
+				return
+			}
+			b = local
+		} else {
+			b = backup.NewRestic(client, c.Param("backup"), "")
+		}
+		driverLabel := "local"
+		if data.Adapter == backup.ResticBackupAdapter {
+			driverLabel = "restic"
 		}
 		go func(s *server.Server, b backup.BackupInterface, logger *log.Entry) {
-			logger.Info("starting restoration process for server backup using local driver")
+			logger.WithField("driver", driverLabel).Info("starting restoration process for server backup")
 			if err := s.RestoreBackup(b, nil); err != nil {
-				logger.WithField("error", err).Error("failed to restore local backup to server")
+				logger.WithField("error", err).Error("failed to restore backup to server")
 			}
-			s.Events().Publish(server.DaemonMessageEvent, "Completed server restoration from local backup.")
+			s.Events().Publish(server.DaemonMessageEvent, "Completed server restoration from "+driverLabel+" backup.")
 			s.Events().Publish(server.BackupRestoreCompletedEvent, "")
-			logger.Info("completed server restoration from local backup")
+			logger.WithField("driver", driverLabel).Info("completed server restoration from backup")
 			s.SetRestoring(false)
 		}(s, b, logger)
 		hasError = false
@@ -180,9 +181,22 @@ func deleteServerBackup(c *gin.Context) {
 	if err != nil {
 		// Just return from the function at this point if the backup was not located.
 		if errors.Is(err, os.ErrNotExist) {
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-				"error": "The requested backup was not found on this server.",
-			})
+			rb, _, rerr := backup.LocateRestic(middleware.ExtractApiClient(c), c.Param("backup"))
+			if rerr != nil {
+				if errors.Is(rerr, os.ErrNotExist) {
+					c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
+						"error": "The requested backup was not found on this server.",
+					})
+					return
+				}
+				middleware.CaptureAndAbort(c, rerr)
+				return
+			}
+			if err := rb.Remove(); err != nil && !errors.Is(err, os.ErrNotExist) {
+				middleware.CaptureAndAbort(c, err)
+				return
+			}
+			c.Status(http.StatusNoContent)
 			return
 		}
 		middleware.CaptureAndAbort(c, err)
