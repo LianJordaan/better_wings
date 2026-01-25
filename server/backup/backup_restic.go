@@ -171,8 +171,16 @@ func (b *ResticBackup) Restore(ctx context.Context, _ io.Reader, _ RestoreCallba
 		return err
 	}
 
-	_, _, err = runRestic(ctx, repoPath, "", "restore", "--overwrite", manifest.SnapshotID, "--target", manifest.TargetPath)
-	return err
+	stdout, stderr, err := runRestic(ctx, repoPath, "", "restore", "--overwrite", manifest.SnapshotID, "--target", manifest.TargetPath)
+	if err != nil {
+		b.log().
+			WithField("stdout", string(stdout)).
+			WithField("stderr", string(stderr)).
+			WithError(err).
+			Error("restic restore failed")
+		return err
+	}
+	return nil
 }
 
 func (b *ResticBackup) Checksum() ([]byte, error) {
