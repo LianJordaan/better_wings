@@ -9,6 +9,7 @@ import (
 	"github.com/apex/log"
 	"github.com/gin-gonic/gin"
 
+	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/router/middleware"
 	"github.com/pterodactyl/wings/server"
 	"github.com/pterodactyl/wings/server/backup"
@@ -29,7 +30,27 @@ func postServerBackup(c *gin.Context) {
 		return
 	}
 
-	adapter := backup.NewRestic(client, data.Uuid, data.Ignore)
+	var adapter backup.BackupInterface
+	mode := strings.ToLower(strings.TrimSpace(config.Get().System.Backups.Mode))
+	switch mode {
+	case "", "restic":
+		adapter = backup.NewRestic(client, data.Uuid, data.Ignore)
+	case "legacy", "normal":
+		switch data.Adapter {
+		case backup.LocalBackupAdapter:
+			adapter = backup.NewLocal(client, data.Uuid, data.Ignore)
+		case backup.S3BackupAdapter:
+			adapter = backup.NewS3(client, data.Uuid, data.Ignore)
+		case backup.ResticBackupAdapter:
+			adapter = backup.NewRestic(client, data.Uuid, data.Ignore)
+		default:
+			middleware.CaptureAndAbort(c, errors.New("router/backups: provided adapter is not valid: "+string(data.Adapter)))
+			return
+		}
+	default:
+		middleware.CaptureAndAbort(c, errors.New("router/backups: invalid backups.mode in config.yml"))
+		return
+	}
 
 	// Attach the server ID and the request ID to the adapter log context for easier
 	// parsing in the logs.

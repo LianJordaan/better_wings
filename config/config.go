@@ -271,6 +271,13 @@ type CrashDetection struct {
 }
 
 type Backups struct {
+	// Mode controls which backup system Wings uses.
+	// "restic" -> always use restic repositories
+	// "legacy" or "normal" -> use the adapter provided by the Panel (wings or s3)
+	//
+	// Defaults to "restic".
+	Mode string `default:"restic" yaml:"mode"`
+
 	// WriteLimit imposes a Disk I/O write limit on backups to the disk, this affects all
 	// backup drivers as the archiver must first write the file to the disk in order to
 	// upload it to any external storage provider.
