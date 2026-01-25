@@ -19,6 +19,7 @@ import (
 func getDownloadBackup(c *gin.Context) {
 	client := middleware.ExtractApiClient(c)
 	manager := middleware.ExtractManager(c)
+	logger := middleware.ExtractLogger(c)
 
 	// Get the payload from the token.
 	token := tokens.BackupPayload{}
@@ -43,10 +44,14 @@ func getDownloadBackup(c *gin.Context) {
 	}
 
 	// Check for a restic manifest before attempting to locate a local archive.
-	if _, _, err := backup.LocateRestic(client, token.BackupUuid); err == nil {
-		c.AbortWithStatusJSON(http.StatusNotImplemented, gin.H{
-			"error": "This backup was created using restic and cannot be downloaded via this endpoint.",
-		})
+	if rb, _, err := backup.LocateRestic(client, token.BackupUuid); err == nil {
+		filename := "backup-" + token.BackupUuid + ".tar.gz"
+		c.Header("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+		c.Header("Content-Type", "application/octet-stream")
+		c.Status(http.StatusOK)
+		if err := rb.StreamArchive(c.Request.Context(), c.Writer); err != nil {
+			logger.WithField("error", err).Error("failed to stream restic backup archive")
+		}
 		return
 	} else if !errors.Is(err, os.ErrNotExist) {
 		middleware.CaptureAndAbort(c, err)

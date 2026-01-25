@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"emperror.dev/errors"
+	"github.com/klauspost/pgzip"
 
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/remote"
@@ -183,11 +185,50 @@ func (b *ResticBackup) Restore(ctx context.Context, _ io.Reader, _ RestoreCallba
 	return nil
 }
 
+// StreamArchive restores the snapshot to a temporary directory and streams a tar.gz archive to w.
+func (b *ResticBackup) StreamArchive(ctx context.Context, w io.Writer) error {
+	manifest, err := readManifest(b.Path())
+	if err != nil {
+		return err
+	}
+	if manifest.SnapshotID == "" {
+		return errors.New("restic: manifest missing snapshot id")
+	}
+	if manifest.RepoPath == "" {
+		return errors.New("restic: manifest missing repo path")
+	}
+	if err := ensureResticRepo(ctx, manifest.RepoPath, false); err != nil {
+		return err
+	}
+
+	tmpDir, err := resticTempDir()
+	if err != nil {
+		return err
+	}
+	restoreDir, err := os.MkdirTemp(tmpDir, "download-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(restoreDir)
+
+	stdout, stderr, err := runRestic(ctx, manifest.RepoPath, "", "restore", manifest.SnapshotID, "--target", restoreDir)
+	if err != nil {
+		b.log().
+			WithField("stdout", string(stdout)).
+			WithField("stderr", string(stderr)).
+			WithError(err).
+			Error("restic restore for download failed")
+		return err
+	}
+
+	return streamTarGz(ctx, restoreDir, w)
+}
+
 func (b *ResticBackup) Checksum() ([]byte, error) {
-    f, err := os.Open(b.Path())
-    if err != nil {
-        return nil, err
-    }
+	f, err := os.Open(b.Path())
+	if err != nil {
+		return nil, err
+	}
     defer f.Close()
 
     h := sha1.New()
@@ -243,11 +284,19 @@ type resticSummary struct {
 }
 
 func resticManifestPath(uuid string) string {
-    return filepath.Join(config.Get().System.BackupDirectory, "restic", "manifests", uuid+".json")
+	return filepath.Join(config.Get().System.BackupDirectory, "restic", "manifests", uuid+".json")
+}
+
+func resticTempDir() (string, error) {
+	dir := filepath.Join(config.Get().System.BackupDirectory, "restic", "tmp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 func resticRepoBasePath() string {
-    cfg := config.Get().System.Backups.Restic
+	cfg := config.Get().System.Backups.Restic
 	if cfg.RepoBasePath != "" {
 		return cfg.RepoBasePath
 	}
@@ -374,11 +423,11 @@ func parseResticSummary(output []byte) (*resticSummary, error) {
 }
 
 func writeExcludeFile(ignore string) (string, error) {
-    dir := filepath.Join(config.Get().System.BackupDirectory, "restic", "tmp")
-    if err := os.MkdirAll(dir, 0o700); err != nil {
-        return "", err
-    }
-    f, err := os.CreateTemp(dir, "exclude-*.txt")
+	dir, err := resticTempDir()
+	if err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp(dir, "exclude-*.txt")
     if err != nil {
         return "", err
     }
@@ -437,6 +486,96 @@ func readManifest(path string) (*resticManifest, error) {
 }
 
 func looksLikeRepoExists(output []byte) bool {
-    lower := strings.ToLower(string(output))
-    return strings.Contains(lower, "config file") || strings.Contains(lower, "already initialized") || strings.Contains(lower, "already exists")
+	lower := strings.ToLower(string(output))
+	return strings.Contains(lower, "config file") || strings.Contains(lower, "already initialized") || strings.Contains(lower, "already exists")
+}
+
+func streamTarGz(ctx context.Context, root string, w io.Writer) error {
+	level := resticCompressionLevel()
+	gw, _ := pgzip.NewWriterLevel(w, level)
+	_ = gw.SetConcurrency(1<<20, 1)
+	defer gw.Close()
+
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	return filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if p == root {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+
+		// Skip sockets (unsupported).
+		if info.Mode()&os.ModeSocket != 0 {
+			return nil
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(p)
+			if err != nil {
+				return nil
+			}
+			header, err := tar.FileInfoHeader(info, target)
+			if err != nil {
+				return err
+			}
+			header.Name = rel
+			return tw.WriteHeader(header)
+		}
+
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		header.Name = rel
+
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+
+		if info.IsDir() || !info.Mode().IsRegular() {
+			return nil
+		}
+
+		f, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(tw, f); err != nil {
+			_ = f.Close()
+			return err
+		}
+		_ = f.Close()
+		return nil
+	})
+}
+
+func resticCompressionLevel() int {
+	switch config.Get().System.Backups.CompressionLevel {
+	case "none":
+		return pgzip.NoCompression
+	case "best_compression":
+		return pgzip.BestCompression
+	default:
+		return pgzip.BestSpeed
+	}
 }
