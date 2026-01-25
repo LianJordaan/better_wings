@@ -1,9 +1,9 @@
 name: Docker
 
 on:
-  push:
-    branches:
-      - develop
+  # push:
+  #   branches:
+  #     - develop
   release:
     types:
       - published
