@@ -314,7 +314,7 @@ type ResticConfiguration struct {
 	Username string `yaml:"username"`
 
 	// RepoPassword is the restic repository password.
-	RepoPassword string `yaml:"repo_password"`
+	RepoPassword string `default:"admin" yaml:"repo_password"`
 
 	// PrivateKeyPath is the path to a private SSH key for remote repository backends (unused for local repos).
 	PrivateKeyPath string `yaml:"private_key_path"`
