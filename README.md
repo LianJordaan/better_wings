@@ -74,6 +74,6 @@ sudo systemctl restart wings
 
 **Notes:**
 
-* The `ARCH` variable automatically selects `amd64` or `arm64` based on your system.
 * Use **latest release** for stable, officially tagged versions.
 * Use **latest workflow build** for nightly builds with the newest changes that may not be fully tested.
+* For Better Wings **v1.1.0 and above**, you **must have Restic installed** on your system for backups to work.
