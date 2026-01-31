@@ -48,10 +48,8 @@ This will download the latest official release from GitHub and install it:
 
 ```bash
 ARCH=$( [ "$(uname -m)" = "x86_64" ] && echo "amd64" || echo "arm64" )
-curl -L -o /tmp/wings.zip "https://github.com/LianJordaan/better_wings/releases/latest/download/wings_linux_$ARCH.zip"
-sudo unzip -o /tmp/wings.zip -d /usr/local/bin
-sudo chmod u+x /usr/local/bin/wings
-rm /tmp/wings.zip
+curl -L -o /usr/local/bin/wings "https://github.com/LianJordaan/better_wings/releases/latest/download/wings_linux_$ARCH"
+sudo chmod +x /usr/local/bin/wings
 sudo systemctl restart wings
 ```
 
