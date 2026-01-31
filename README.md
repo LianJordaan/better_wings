@@ -39,3 +39,41 @@ I would like to extend my sincere thanks to the following sponsors for helping f
 Please use the [pterodactyl/panel](https://github.com/pterodactyl/panel) repository to report any issues or make
 feature requests for Wings. In addition, the [security policy](https://github.com/pterodactyl/panel/security/policy) listed
 within that repository also applies to Wings.
+
+## Installing Better Wings
+
+### 1. Install the **latest release**
+
+This will download the latest official release from GitHub and install it:
+
+```bash
+ARCH=$( [ "$(uname -m)" = "x86_64" ] && echo "amd64" || echo "arm64" )
+curl -L -o /tmp/wings.zip "https://github.com/LianJordaan/better_wings/releases/latest/download/wings_linux_$ARCH.zip"
+sudo unzip -o /tmp/wings.zip -d /usr/local/bin
+sudo chmod u+x /usr/local/bin/wings
+rm /tmp/wings.zip
+sudo systemctl restart wings
+````
+
+---
+
+### 2. Install the **latest workflow build (nightly)**
+
+This will download the latest GitHub Actions build artifact for the `develop` branch:
+
+```bash
+ARCH=$( [ "$(uname -m)" = "x86_64" ] && echo "amd64" || echo "arm64" )
+curl -L -o /tmp/wings.zip "https://nightly.link/LianJordaan/better_wings/workflows/push.yaml/develop/wings_linux_$ARCH.zip"
+sudo unzip -o /tmp/wings.zip -d /usr/local/bin
+sudo chmod u+x /usr/local/bin/wings
+rm /tmp/wings.zip
+sudo systemctl restart wings
+```
+
+---
+
+**Notes:**
+
+* The `ARCH` variable automatically selects `amd64` or `arm64` based on your system.
+* Use **latest release** for stable, officially tagged versions.
+* Use **latest workflow build** for nightly builds with the newest changes that may not be fully tested.
