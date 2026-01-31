@@ -53,7 +53,7 @@ sudo unzip -o /tmp/wings.zip -d /usr/local/bin
 sudo chmod u+x /usr/local/bin/wings
 rm /tmp/wings.zip
 sudo systemctl restart wings
-````
+```
 
 ---
 
