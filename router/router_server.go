@@ -14,6 +14,7 @@ import (
 	"github.com/pterodactyl/wings/router/middleware"
 	"github.com/pterodactyl/wings/router/tokens"
 	"github.com/pterodactyl/wings/server"
+	"github.com/pterodactyl/wings/server/backup"
 	"github.com/pterodactyl/wings/server/transfer"
 )
 
@@ -231,6 +232,9 @@ func deleteServer(c *gin.Context) {
 		fs := s.Filesystem()
 		p := fs.Path()
 		_ = fs.UnixFS().Close()
+		if err := backup.RemoveResticDataForServer(s.ID()); err != nil {
+			log.WithFields(log.Fields{"server": s.ID(), "error": err}).Warn("failed to remove restic backup data during server deletion process")
+		}
 		if err := os.RemoveAll(p); err != nil {
 			log.WithFields(log.Fields{"path": p, "error": err}).Warn("failed to remove server files during deletion process")
 		}

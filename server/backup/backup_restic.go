@@ -315,6 +315,93 @@ func resticRepoPath(fsys *filesystem.Filesystem) (string, error) {
     return filepath.Join(base, name), nil
 }
 
+// RemoveResticDataForServer removes all restic manifests and repositories that belong
+// to the provided server UUID.
+//
+// This is intended to be called during server deletion and operates in a best-effort
+// manner, attempting to clean up as much data as possible even if some operations fail.
+func RemoveResticDataForServer(serverID string) error {
+    serverID = strings.TrimSpace(serverID)
+    if serverID == "" {
+        return errors.New("restic: server id is empty")
+    }
+
+    manifestDir := filepath.Join(config.Get().System.BackupDirectory, "restic", "manifests")
+    repoPaths := map[string]struct{}{
+        filepath.Join(resticRepoBasePath(), serverID): {},
+    }
+
+    var failures []string
+
+    entries, err := os.ReadDir(manifestDir)
+    if err != nil {
+        if !errors.Is(err, os.ErrNotExist) {
+            failures = append(failures, "failed reading restic manifests directory: "+err.Error())
+        }
+    } else {
+        for _, entry := range entries {
+            if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+                continue
+            }
+
+            manifestPath := filepath.Join(manifestDir, entry.Name())
+            manifest, err := readManifest(manifestPath)
+            if err != nil {
+                failures = append(failures, "failed reading restic manifest "+entry.Name()+": "+err.Error())
+                continue
+            }
+
+            if !resticManifestBelongsToServer(manifest, serverID) {
+                continue
+            }
+
+            repoPath := filepath.Clean(manifest.RepoPath)
+            if repoPath != "" && repoPath != "." {
+                repoPaths[repoPath] = struct{}{}
+            }
+
+            if err := os.Remove(manifestPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+                failures = append(failures, "failed removing restic manifest "+entry.Name()+": "+err.Error())
+            }
+        }
+    }
+
+    for repoPath := range repoPaths {
+        cleanRepoPath := filepath.Clean(repoPath)
+        if filepath.Base(cleanRepoPath) != serverID {
+            continue
+        }
+
+        if err := os.RemoveAll(cleanRepoPath); err != nil {
+            failures = append(failures, "failed removing restic repository "+cleanRepoPath+": "+err.Error())
+        }
+    }
+
+    if len(failures) > 0 {
+        return errors.New(strings.Join(failures, "; "))
+    }
+
+    return nil
+}
+
+func resticManifestBelongsToServer(manifest *resticManifest, serverID string) bool {
+    if manifest == nil || serverID == "" {
+        return false
+    }
+
+    repoBase := filepath.Base(filepath.Clean(manifest.RepoPath))
+    if repoBase == serverID {
+        return true
+    }
+
+    targetBase := filepath.Base(filepath.Clean(manifest.TargetPath))
+    if targetBase == serverID {
+        return true
+    }
+
+    return false
+}
+
 func ensureResticRepo(ctx context.Context, repoPath string, initIfMissing bool) error {
 	if repoPath == "" {
 		return errors.New("restic: repository path is empty")
